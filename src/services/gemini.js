@@ -1,5 +1,6 @@
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import { CSV_TOOL_DECLARATIONS } from './csvTools';
+import { JSON_TOOL_DECLARATIONS } from './jsonTools';
 
 const genAI = new GoogleGenerativeAI(process.env.REACT_APP_GEMINI_API_KEY || '');
 
@@ -132,7 +133,14 @@ export const streamChat = async function* (history, newMessage, imageParts = [],
 // executeFn(toolName, args) → plain JS object with the result
 // Returns the final text response from the model.
 
-export const chatWithCsvTools = async (history, newMessage, csvHeaders, executeFn, userFirstName = '') => {
+export const chatWithDataTools = async (
+  history,
+  newMessage,
+  csvHeaders,
+  jsonFieldNames,
+  executeFn,
+  userFirstName = ''
+) => {
   const systemInstruction = await loadSystemPrompt();
   const personalization = userFirstName
     ? `\n\nCurrent user context: firstName="${userFirstName}". Use this for personalized greeting behavior when appropriate.`
@@ -140,7 +148,7 @@ export const chatWithCsvTools = async (history, newMessage, csvHeaders, executeF
   const effectiveSystemInstruction = `${systemInstruction}${personalization}`.trim();
   const model = genAI.getGenerativeModel({
     model: MODEL,
-    tools: [{ functionDeclarations: CSV_TOOL_DECLARATIONS }],
+    tools: [{ functionDeclarations: [...CSV_TOOL_DECLARATIONS, ...JSON_TOOL_DECLARATIONS] }],
   });
 
   const baseHistory = history.map((m) => ({
@@ -162,8 +170,11 @@ export const chatWithCsvTools = async (history, newMessage, csvHeaders, executeF
   const chat = model.startChat({ history: chatHistory });
 
   // Include column names so the model can match user intent to exact column names
-  const msgWithContext = csvHeaders?.length
-    ? `[CSV columns: ${csvHeaders.join(', ')}]\n\n${newMessage}`
+  const prefixParts = [];
+  if (csvHeaders?.length) prefixParts.push(`[CSV columns: ${csvHeaders.join(', ')}]`);
+  if (jsonFieldNames?.length) prefixParts.push(`[JSON fields: ${jsonFieldNames.join(', ')}]`);
+  const msgWithContext = prefixParts.length
+    ? `${prefixParts.join('\n')}\n\n${newMessage}`
     : newMessage;
 
   let response = (await chat.sendMessage(msgWithContext)).response;

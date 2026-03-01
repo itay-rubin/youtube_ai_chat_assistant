@@ -18,6 +18,7 @@ Create a `.env` file in the project root with:
 | `REACT_APP_GEMINI_API_KEY` | Yes | Frontend (baked in at build) | Google Gemini API key. Get one at [Google AI Studio](https://aistudio.google.com/apikey). |
 | `REACT_APP_MONGODB_URI` | Yes | Backend | MongoDB Atlas connection string. Format: `mongodb+srv://USER:PASSWORD@CLUSTER.mongodb.net/` |
 | `REACT_APP_API_URL` | Production only | Frontend (baked in at build) | Full URL of the backend, e.g. `https://your-backend.onrender.com`. Leave blank for local dev (proxy handles it). |
+| `YOUTUBE_API_KEY` | Optional | Backend YouTube downloader | YouTube Data API v3 key. Enables more reliable `likeCount` / `commentCount` in downloaded JSON. |
 
 The backend also accepts `MONGODB_URI` or `REACT_APP_MONGO_URI` as the MongoDB connection string if you prefer those names.
 
@@ -256,6 +257,22 @@ All packages are installed via `npm install`. Key dependencies:
 4. Watch the progress bar while the backend collects videos, transcript text, and stats.
 5. Click **Download JSON** when the job finishes.
 6. Drag the downloaded `.json` file into chat (or attach it via 📎) and ask analysis questions.
+
+## Chat Tools
+
+These tools are available to Gemini via function calling and are triggered automatically when relevant.
+
+### CSV tools
+
+- `compute_column_stats(column)` – mean, median, std, min, max, count for a numeric CSV column.
+- `get_value_counts(column, top_n)` – frequency table for a categorical CSV column.
+- `get_top_tweets(sort_column, n, ascending)` – top/bottom ranked tweet rows by a metric (including `engagement`).
+
+### JSON / YouTube tools
+
+- `compute_stats_json(field)` – computes mean, median, std, min, max, count for numeric fields in uploaded YouTube JSON (for example `viewCount`, `lengthSeconds`, `transcriptLength`).
+- `plot_metric_vs_time(metric, chart_type, limit)` – returns chart payloads rendered in-chat as a Recharts line/bar chart. The chart supports enlarge and CSV download.
+- `play_video(video_title, rank)` – returns a clickable video card (thumbnail + title) that opens the YouTube URL in a new tab.
 
 ## Chat System Prompt
 

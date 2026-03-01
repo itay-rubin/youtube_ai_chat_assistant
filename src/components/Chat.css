@@ -1007,6 +1007,128 @@
   margin: 0 0 0.6rem 0.5rem;
 }
 
+/* ── Tool charts/cards for JSON analysis ─────────────────────────────────── */
+
+.metric-time-wrap {
+  margin: 0.85rem 0 0.2rem;
+  padding: 0.75rem;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.metric-time-wrap.expanded {
+  margin: 0;
+}
+
+.metric-time-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.65rem;
+  align-items: center;
+  margin-bottom: 0.55rem;
+  color: rgba(255, 255, 255, 0.85);
+  font-size: 0.78rem;
+  font-weight: 600;
+}
+
+.metric-time-actions {
+  display: inline-flex;
+  gap: 0.4rem;
+}
+
+.metric-time-actions button {
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  background: rgba(255, 255, 255, 0.07);
+  color: rgba(255, 255, 255, 0.85);
+  border-radius: 8px;
+  padding: 0.24rem 0.5rem;
+  font-size: 0.72rem;
+  cursor: pointer;
+}
+
+.metric-time-chart {
+  width: 100%;
+  height: 260px;
+}
+
+.video-card-link {
+  text-decoration: none;
+}
+
+.video-card {
+  margin-top: 0.7rem;
+  border-radius: 12px;
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.11);
+  background: rgba(255, 255, 255, 0.05);
+  max-width: 420px;
+}
+
+.video-card-thumb {
+  width: 100%;
+  height: 180px;
+  object-fit: cover;
+  display: block;
+}
+
+.video-card-body {
+  padding: 0.65rem 0.75rem 0.75rem;
+}
+
+.video-card-title {
+  color: #fff;
+  font-size: 0.86rem;
+  font-weight: 600;
+  line-height: 1.35;
+}
+
+.video-card-meta {
+  margin-top: 0.25rem;
+  color: rgba(255, 255, 255, 0.58);
+  font-size: 0.75rem;
+}
+
+.chart-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 300;
+  background: rgba(0, 0, 0, 0.55);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1rem;
+}
+
+.chart-modal {
+  width: min(980px, 95vw);
+  background: #111327;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 14px;
+  padding: 0.9rem;
+}
+
+.chart-modal-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 0.6rem;
+}
+
+.chart-modal-top h4 {
+  margin: 0;
+  color: #fff;
+}
+
+.chart-modal-top button {
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  background: rgba(255, 255, 255, 0.08);
+  color: #fff;
+  border-radius: 8px;
+  padding: 0.35rem 0.6rem;
+  cursor: pointer;
+}
+
 /* ── Empty state ─────────────────────────────────────────────────────────── */
 
 .chat-empty-state {
