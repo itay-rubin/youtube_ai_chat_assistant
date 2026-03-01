@@ -22,6 +22,8 @@ Create a `.env` file in the project root with:
 
 The backend also accepts `MONGODB_URI` or `REACT_APP_MONGO_URI` as the MongoDB connection string if you prefer those names.
 
+> **Production note:** Never commit real secrets in `.env`. Use your hosting provider's environment variable manager (for example, Render dashboard secrets) for production keys.
+
 ### Example `.env` (local development)
 
 ```
@@ -249,6 +251,14 @@ All packages are installed via `npm install`. Key dependencies:
 - **Sample data included** – `public/veritasium_sample.json` contains 10 downloaded videos from `@veritasium`.
 - **Chat integration** – You can drag a JSON file into chat and the assistant will use it as analysis context.
 
+### Analysis & Media Tools
+
+- **JSON statistics tool** – `compute_stats_json(field)` computes mean, median, std, min, max, and count on numeric JSON video fields.
+- **Metric trend chart tool** – `plot_metric_vs_time(metric, chart_type, limit)` renders in-chat Recharts visualizations with enlarge and CSV download actions.
+- **Video playback helper** – `play_video(video_title, rank, order)` returns clickable video cards for direct open-in-new-tab playback.
+- **Image generation tool** – `generateImage(prompt)` creates images from natural language prompts and uses chat anchor images as references when present.
+- **In-chat media UX** – Generated images are displayed in the chat stream with click-to-enlarge modal and download button.
+
 ## YouTube Data Fetcher Usage
 
 1. Log in and open the **YouTube Channel Download** tab.
@@ -272,7 +282,11 @@ These tools are available to Gemini via function calling and are triggered autom
 
 - `compute_stats_json(field)` – computes mean, median, std, min, max, count for numeric fields in uploaded YouTube JSON (for example `viewCount`, `lengthSeconds`, `transcriptLength`).
 - `plot_metric_vs_time(metric, chart_type, limit)` – returns chart payloads rendered in-chat as a Recharts line/bar chart. The chart supports enlarge and CSV download.
-- `play_video(video_title, rank)` – returns a clickable video card (thumbnail + title) that opens the YouTube URL in a new tab.
+- `play_video(video_title, rank, order)` – returns a clickable video card (thumbnail + title) that opens the YouTube URL in a new tab.
+
+### Image tool
+
+- `generateImage(prompt)` – generates an in-chat image from text. If an anchor image is already in chat context, it is used as a visual reference.
 
 ## Chat System Prompt
 

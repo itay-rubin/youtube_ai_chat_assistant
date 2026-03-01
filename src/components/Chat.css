@@ -1089,6 +1089,40 @@
   font-size: 0.75rem;
 }
 
+.generated-image-card {
+  margin-top: 0.7rem;
+  max-width: 420px;
+}
+
+.generated-image-preview {
+  width: 100%;
+  border-radius: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  cursor: zoom-in;
+}
+
+.generated-image-actions {
+  display: flex;
+  gap: 0.45rem;
+  margin-top: 0.45rem;
+}
+
+.generated-image-actions button {
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  background: rgba(255, 255, 255, 0.07);
+  color: rgba(255, 255, 255, 0.88);
+  border-radius: 8px;
+  padding: 0.28rem 0.55rem;
+  font-size: 0.74rem;
+  cursor: pointer;
+}
+
+.generated-image-caption {
+  margin-top: 0.35rem;
+  color: rgba(255, 255, 255, 0.7);
+  font-size: 0.76rem;
+}
+
 .chart-modal-backdrop {
   position: fixed;
   inset: 0;
@@ -1127,6 +1161,17 @@
   border-radius: 8px;
   padding: 0.35rem 0.6rem;
   cursor: pointer;
+}
+
+.generated-image-modal-body {
+  max-height: 75vh;
+  overflow-y: auto;
+}
+
+.generated-image-modal {
+  width: 100%;
+  border-radius: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
 }
 
 /* ── Empty state ─────────────────────────────────────────────────────────── */
