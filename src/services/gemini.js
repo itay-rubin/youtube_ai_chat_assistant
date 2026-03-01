@@ -1,10 +1,12 @@
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import { CSV_TOOL_DECLARATIONS } from './csvTools';
 import { JSON_TOOL_DECLARATIONS } from './jsonTools';
+import { MEDIA_TOOL_DECLARATIONS } from './mediaTools';
 
 const genAI = new GoogleGenerativeAI(process.env.REACT_APP_GEMINI_API_KEY || '');
 
 const MODEL = 'gemini-2.5-flash-lite';
+const IMAGE_MODEL = 'gemini-2.5-flash-image';
 
 const SEARCH_TOOL = { googleSearch: {} };
 const CODE_EXEC_TOOL = { codeExecution: {} };
@@ -23,6 +25,46 @@ async function loadSystemPrompt() {
   }
   return cachedPrompt;
 }
+
+export const generateImageWithGemini = async (prompt, anchorImage = null) => {
+  if (!prompt?.trim()) {
+    throw new Error('Image prompt is required');
+  }
+
+  const userParts = [{ text: prompt.trim() }];
+  if (anchorImage?.data) {
+    userParts.push({
+      inlineData: {
+        mimeType: anchorImage.mimeType || 'image/png',
+        data: anchorImage.data,
+      },
+    });
+  }
+
+  try {
+    const model = genAI.getGenerativeModel({ model: IMAGE_MODEL });
+    const result = await model.generateContent({
+      contents: [{ role: 'user', parts: userParts }],
+      generationConfig: { responseModalities: ['TEXT', 'IMAGE'] },
+    });
+    const response = result.response;
+    const parts = response?.candidates?.[0]?.content?.parts || [];
+    const imagePart = parts.find((p) => p.inlineData?.mimeType?.startsWith('image/'));
+    if (!imagePart?.inlineData?.data) {
+      throw new Error(`Model ${IMAGE_MODEL} returned no image data`);
+    }
+    const textPart = parts.find((p) => p.text)?.text || '';
+    return {
+      _chartType: 'generated_image',
+      prompt: prompt.trim(),
+      mimeType: imagePart.inlineData.mimeType,
+      data: imagePart.inlineData.data,
+      caption: textPart,
+    };
+  } catch (err) {
+    throw new Error(err?.message || 'Image generation failed');
+  }
+};
 
 // Yields:
 //   { type: 'text', text }           — streaming text chunks
@@ -148,7 +190,7 @@ export const chatWithDataTools = async (
   const effectiveSystemInstruction = `${systemInstruction}${personalization}`.trim();
   const model = genAI.getGenerativeModel({
     model: MODEL,
-    tools: [{ functionDeclarations: [...CSV_TOOL_DECLARATIONS, ...JSON_TOOL_DECLARATIONS] }],
+    tools: [{ functionDeclarations: [...CSV_TOOL_DECLARATIONS, ...JSON_TOOL_DECLARATIONS, ...MEDIA_TOOL_DECLARATIONS] }],
   });
 
   const baseHistory = history.map((m) => ({
@@ -190,9 +232,9 @@ export const chatWithDataTools = async (
     if (!funcCall) break;
 
     const { name, args } = funcCall.functionCall;
-    console.log('[CSV Tool]', name, args);
-    const toolResult = executeFn(name, args);
-    console.log('[CSV Tool result]', toolResult);
+    console.log('[Tool]', name, args);
+    const toolResult = await Promise.resolve(executeFn(name, args));
+    console.log('[Tool result]', toolResult);
 
     // Log the call for persistence
     toolCalls.push({ name, args, result: toolResult });

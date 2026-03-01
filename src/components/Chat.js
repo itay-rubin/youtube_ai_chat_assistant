@@ -12,7 +12,12 @@ import {
   CartesianGrid,
   Tooltip,
 } from 'recharts';
-import { streamChat, chatWithDataTools, CODE_KEYWORDS } from '../services/gemini';
+import {
+  streamChat,
+  chatWithDataTools,
+  CODE_KEYWORDS,
+  generateImageWithGemini,
+} from '../services/gemini';
 import { parseCsvToRows, executeTool, computeDatasetSummary, enrichWithEngagement, buildSlimCsv } from '../services/csvTools';
 import { executeJsonTool } from '../services/jsonTools';
 import {
@@ -174,6 +179,21 @@ const downloadChartCsv = (chart) => {
   URL.revokeObjectURL(url);
 };
 
+const downloadBase64File = (base64Data, mimeType, fileName) => {
+  const byteString = atob(base64Data);
+  const array = new Uint8Array(byteString.length);
+  for (let i = 0; i < byteString.length; i += 1) array[i] = byteString.charCodeAt(i);
+  const blob = new Blob([array], { type: mimeType || 'image/png' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = fileName;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+};
+
 function MetricTimeChart({ chart, expanded = false, onExpand }) {
   const metric = chart.metric;
   const lineColor = '#818cf8';
@@ -235,6 +255,31 @@ function VideoCard({ card }) {
   );
 }
 
+function GeneratedImageCard({ image, onExpand }) {
+  return (
+    <div className="generated-image-card">
+      <img
+        src={`data:${image.mimeType};base64,${image.data}`}
+        alt={image.prompt || 'Generated'}
+        className="generated-image-preview"
+        onClick={onExpand}
+      />
+      <div className="generated-image-actions">
+        <button type="button" onClick={onExpand}>
+          Click to Enlarge
+        </button>
+        <button
+          type="button"
+          onClick={() => downloadBase64File(image.data, image.mimeType, 'generated-image.png')}
+        >
+          Download
+        </button>
+      </div>
+      {image.caption ? <div className="generated-image-caption">{image.caption}</div> : null}
+    </div>
+  );
+}
+
 // ── Main component ────────────────────────────────────────────────────────────
 
 export default function Chat({ username, userFirstName, onLogout }) {
@@ -257,6 +302,7 @@ export default function Chat({ username, userFirstName, onLogout }) {
   const [dragOver, setDragOver] = useState(false);
   const [openMenuId, setOpenMenuId] = useState(null);
   const [expandedChart, setExpandedChart] = useState(null);
+  const [expandedImage, setExpandedImage] = useState(null);
 
   const bottomRef = useRef(null);
   const inputRef = useRef(null);
@@ -508,8 +554,10 @@ export default function Chat({ username, userFirstName, onLogout }) {
     // ── Routing intent (computed first so we know whether Python/base64 is needed) ──
     // PYTHON_ONLY = things the client tools genuinely cannot produce
     const PYTHON_ONLY_KEYWORDS = /\b(regression|scatter|histogram|seaborn|matplotlib|numpy|time.?series|heatmap|box.?plot|violin|distribut|linear.?model|logistic|forecast|trend.?line)\b/i;
+    const IMAGE_GEN_KEYWORDS = /\b(generate|create|draw|design|illustrat|render|poster|thumbnail|logo|avatar|image of)\b/i;
     const wantPythonOnly = PYTHON_ONLY_KEYWORDS.test(text);
     const wantCode = CODE_KEYWORDS.test(text) && !sessionCsvRows && !sessionJsonData;
+    const wantImageGeneration = IMAGE_GEN_KEYWORDS.test(text);
     const capturedCsv = csvContext;
     const capturedJson = jsonContext;
     const capturedJsonData = capturedJson?.parsed || sessionJsonData;
@@ -519,7 +567,11 @@ export default function Chat({ username, userFirstName, onLogout }) {
     //   useTools        — CSV loaded + no Python needed → client-side JS tools (free, fast)
     //   useCodeExecution — Python explicitly needed (regression, histogram, etc.)
     //   else            — Google Search streaming (also used for "tell me about this file")
-    const useTools = (!!sessionCsvRows || !!capturedJsonData) && !wantPythonOnly && !wantCode && !capturedCsv;
+    const useTools =
+      (!!sessionCsvRows || !!capturedJsonData || wantImageGeneration) &&
+      !wantPythonOnly &&
+      !wantCode &&
+      !capturedCsv;
     const useCodeExecution = wantPythonOnly || wantCode;
 
     // ── Build prompt ─────────────────────────────────────────────────────────
@@ -595,6 +647,10 @@ ${sessionSummary}${slimCsvBlock}
     setMessages((m) => [...m, userMsg]);
     setInput('');
     const capturedImages = [...images];
+    const latestHistoricalImage = [...messages]
+      .reverse()
+      .find((m) => Array.isArray(m.images) && m.images.length > 0)?.images?.[0] || null;
+    const anchorImage = capturedImages[0] || latestHistoricalImage || null;
     setImages([]);
     setCsvContext(null);
     setJsonContext(null);
@@ -626,7 +682,26 @@ ${sessionSummary}${slimCsvBlock}
     let toolCalls = [];
 
     try {
-      if (useTools) {
+      if (wantImageGeneration && text) {
+        // Direct image path: avoid sending oversized dataset context into the
+        // text model before image generation tool selection.
+        const generated = await generateImageWithGemini(text, anchorImage);
+        toolCharts = [generated];
+        toolCalls = [{ name: 'generateImage', args: { prompt: text }, result: { _chartType: 'generated_image' } }];
+        fullContent = generated.caption || 'Generated image.';
+        setMessages((m) =>
+          m.map((msg) =>
+            msg.id === assistantId
+              ? {
+                  ...msg,
+                  content: fullContent,
+                  charts: toolCharts,
+                  toolCalls,
+                }
+              : msg
+          )
+        );
+      } else if (useTools) {
         // ── Function-calling path: Gemini picks tool + args, JS executes ──────
         console.log(
           '[Chat] useTools=true | rows:',
@@ -643,6 +718,9 @@ ${sessionSummary}${slimCsvBlock}
           sessionCsvHeaders,
           jsonFieldNames,
           (toolName, args) => {
+            if (toolName === 'generateImage') {
+              return generateImageWithGemini(args?.prompt || '', anchorImage);
+            }
             if (['compute_stats_json', 'plot_metric_vs_time', 'play_video'].includes(toolName)) {
               return executeJsonTool(toolName, args, capturedJsonData);
             }
@@ -920,6 +998,12 @@ ${sessionSummary}${slimCsvBlock}
                         chart={chart}
                         onExpand={() => setExpandedChart(chart)}
                       />
+                    ) : chart._chartType === 'generated_image' ? (
+                      <GeneratedImageCard
+                        key={ci}
+                        image={chart}
+                        onExpand={() => setExpandedImage(chart)}
+                      />
                     ) : chart._chartType === 'video_card' ? (
                       <VideoCard key={ci} card={chart} />
                     ) : null
@@ -1041,6 +1125,40 @@ ${sessionSummary}${slimCsvBlock}
                     </button>
                   </div>
                   <MetricTimeChart chart={expandedChart} expanded />
+                </div>
+              </div>
+            )}
+
+            {expandedImage && (
+              <div className="chart-modal-backdrop" onClick={() => setExpandedImage(null)}>
+                <div className="chart-modal" onClick={(e) => e.stopPropagation()}>
+                  <div className="chart-modal-top">
+                    <h4>Generated Image</h4>
+                    <button type="button" onClick={() => setExpandedImage(null)}>
+                      Close
+                    </button>
+                  </div>
+                  <div className="generated-image-modal-body">
+                    <img
+                      src={`data:${expandedImage.mimeType};base64,${expandedImage.data}`}
+                      alt={expandedImage.prompt || 'Generated'}
+                      className="generated-image-modal"
+                    />
+                    <div className="generated-image-actions">
+                      <button
+                        type="button"
+                        onClick={() =>
+                          downloadBase64File(
+                            expandedImage.data,
+                            expandedImage.mimeType,
+                            'generated-image.png'
+                          )
+                        }
+                      >
+                        Download
+                      </button>
+                    </div>
+                  </div>
                 </div>
               </div>
             )}
