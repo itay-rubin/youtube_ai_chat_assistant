@@ -3,6 +3,8 @@ const express = require('express');
 const { MongoClient, ObjectId } = require('mongodb');
 const bcrypt = require('bcryptjs');
 const cors = require('cors');
+const crypto = require('crypto');
+const { fetchChannelVideos } = require('./services/youtubeDownloader');
 
 const app = express();
 app.use(cors());
@@ -12,6 +14,7 @@ const URI = process.env.REACT_APP_MONGODB_URI || process.env.MONGODB_URI || proc
 const DB = 'chatapp';
 
 let db;
+const youtubeJobs = new Map();
 
 async function connect() {
   const client = await MongoClient.connect(URI);
@@ -187,6 +190,97 @@ app.post('/api/messages', async (req, res) => {
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
+});
+
+// ── YouTube Data Fetcher ──────────────────────────────────────────────────────
+
+app.post('/api/youtube/jobs', async (req, res) => {
+  try {
+    const { url, maxVideos } = req.body || {};
+    const parsedMaxVideos = Number(maxVideos);
+    if (!url) return res.status(400).json({ error: 'url is required' });
+    if (!Number.isInteger(parsedMaxVideos) || parsedMaxVideos < 1 || parsedMaxVideos > 100) {
+      return res.status(400).json({ error: 'maxVideos must be an integer between 1 and 100' });
+    }
+
+    const jobId = crypto.randomUUID();
+    const fileName = `youtube_channel_data_${jobId}.json`;
+    youtubeJobs.set(jobId, {
+      id: jobId,
+      status: 'running',
+      progress: 0,
+      createdAt: new Date().toISOString(),
+      url,
+      maxVideos: parsedMaxVideos,
+      currentVideo: '',
+      fileName,
+      result: null,
+      error: null,
+    });
+
+    fetchChannelVideos(url, parsedMaxVideos, (progressData) => {
+      const current = youtubeJobs.get(jobId);
+      if (!current) return;
+      youtubeJobs.set(jobId, {
+        ...current,
+        progress: progressData.progress,
+        currentVideo: progressData.currentVideo || '',
+      });
+    })
+      .then((data) => {
+        const current = youtubeJobs.get(jobId);
+        if (!current) return;
+        youtubeJobs.set(jobId, {
+          ...current,
+          status: 'completed',
+          progress: 100,
+          completedAt: new Date().toISOString(),
+          result: data,
+        });
+      })
+      .catch((err) => {
+        const current = youtubeJobs.get(jobId);
+        if (!current) return;
+        youtubeJobs.set(jobId, {
+          ...current,
+          status: 'failed',
+          completedAt: new Date().toISOString(),
+          error: err.message || 'Failed to fetch YouTube channel data',
+        });
+      });
+
+    res.json({ ok: true, jobId });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/api/youtube/jobs/:id', (req, res) => {
+  const job = youtubeJobs.get(req.params.id);
+  if (!job) return res.status(404).json({ error: 'Job not found' });
+  res.json({
+    id: job.id,
+    status: job.status,
+    progress: job.progress,
+    currentVideo: job.currentVideo,
+    createdAt: job.createdAt,
+    completedAt: job.completedAt || null,
+    fileName: job.fileName,
+    hasResult: Boolean(job.result),
+    result: job.status === 'completed' ? job.result : null,
+    error: job.error,
+  });
+});
+
+app.get('/api/youtube/jobs/:id/download', (req, res) => {
+  const job = youtubeJobs.get(req.params.id);
+  if (!job) return res.status(404).json({ error: 'Job not found' });
+  if (job.status !== 'completed' || !job.result) {
+    return res.status(400).json({ error: 'Job is not completed yet' });
+  }
+  res.setHeader('Content-Type', 'application/json');
+  res.setHeader('Content-Disposition', `attachment; filename="${job.fileName}"`);
+  res.send(JSON.stringify(job.result, null, 2));
 });
 
 app.get('/api/messages', async (req, res) => {

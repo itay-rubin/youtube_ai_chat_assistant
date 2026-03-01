@@ -11,6 +11,7 @@ import {
   loadMessages,
 } from '../services/mongoApi';
 import EngagementChart from './EngagementChart';
+import YouTubeDownloader from './YouTubeDownloader';
 import './Chat.css';
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -44,6 +45,33 @@ const parseCSV = (text) => {
   const truncated = text.length > 500000;
 
   return { headers, rowCount, preview, base64, truncated };
+};
+
+const parseJsonAttachment = (fileName, text) => {
+  const parsed = JSON.parse(text);
+  const videos = Array.isArray(parsed?.videos) ? parsed.videos : [];
+  const channel = parsed?.channel || {};
+  const summary = [
+    `JSON file: ${fileName}`,
+    `Channel: ${channel.title || channel.channelId || 'Unknown channel'}`,
+    `Videos: ${videos.length}`,
+    videos.length
+      ? `Sample titles: ${videos
+          .slice(0, 3)
+          .map((v) => v.title)
+          .filter(Boolean)
+          .join(' | ')}`
+      : '',
+  ]
+    .filter(Boolean)
+    .join('\n');
+
+  return {
+    name: fileName,
+    summary,
+    totalVideos: videos.length,
+    jsonText: JSON.stringify(parsed, null, 2),
+  };
 };
 
 // Extract plain text from a message (for history only — never returns base64)
@@ -111,16 +139,20 @@ function StructuredParts({ parts }) {
 // ── Main component ────────────────────────────────────────────────────────────
 
 export default function Chat({ username, userFirstName, onLogout }) {
+  const [activePage, setActivePage] = useState('chat');
   const [sessions, setSessions] = useState([]);
   const [activeSessionId, setActiveSessionId] = useState(null);
   const [messages, setMessages] = useState([]);
   const [input, setInput] = useState('');
   const [images, setImages] = useState([]);
   const [csvContext, setCsvContext] = useState(null);     // pending attachment chip
+  const [jsonContext, setJsonContext] = useState(null);   // pending JSON chip
   const [sessionCsvRows, setSessionCsvRows] = useState(null);    // parsed rows for JS tools
   const [sessionCsvHeaders, setSessionCsvHeaders] = useState(null); // headers for tool routing
   const [csvDataSummary, setCsvDataSummary] = useState(null);    // auto-computed column stats summary
   const [sessionSlimCsv, setSessionSlimCsv] = useState(null);   // key-columns CSV string sent directly to Gemini
+  const [sessionJsonSummary, setSessionJsonSummary] = useState(null);
+  const [sessionJsonText, setSessionJsonText] = useState(null);
   const [streaming, setStreaming] = useState(false);
   const [dragOver, setDragOver] = useState(false);
   const [openMenuId, setOpenMenuId] = useState(null);
@@ -177,8 +209,11 @@ export default function Chat({ username, userFirstName, onLogout }) {
     setInput('');
     setImages([]);
     setCsvContext(null);
+    setJsonContext(null);
     setSessionCsvRows(null);
     setSessionCsvHeaders(null);
+    setSessionJsonSummary(null);
+    setSessionJsonText(null);
   };
 
   const handleSelectSession = (sessionId) => {
@@ -187,8 +222,11 @@ export default function Chat({ username, userFirstName, onLogout }) {
     setInput('');
     setImages([]);
     setCsvContext(null);
+    setJsonContext(null);
     setSessionCsvRows(null);
     setSessionCsvHeaders(null);
+    setSessionJsonSummary(null);
+    setSessionJsonText(null);
   };
 
   const handleDeleteSession = async (sessionId, e) => {
@@ -223,10 +261,12 @@ export default function Chat({ username, userFirstName, onLogout }) {
 
   const handleDrop = async (e) => {
     e.preventDefault();
+    if (activePage !== 'chat') return;
     setDragOver(false);
     const files = [...e.dataTransfer.files];
 
     const csvFiles = files.filter((f) => f.name.endsWith('.csv') || f.type === 'text/csv');
+    const jsonFiles = files.filter((f) => f.name.toLowerCase().endsWith('.json') || f.type === 'application/json');
     const imageFiles = files.filter((f) => f.type.startsWith('image/'));
 
     if (csvFiles.length > 0) {
@@ -242,6 +282,19 @@ export default function Chat({ username, userFirstName, onLogout }) {
         setSessionCsvRows(rows);
         setCsvDataSummary(computeDatasetSummary(rows, headers));
         setSessionSlimCsv(buildSlimCsv(rows, headers));
+      }
+    }
+
+    if (jsonFiles.length > 0) {
+      const file = jsonFiles[0];
+      try {
+        const text = await fileToText(file);
+        const parsed = parseJsonAttachment(file.name, text);
+        setJsonContext(parsed);
+        setSessionJsonSummary(parsed.summary);
+        setSessionJsonText(parsed.jsonText);
+      } catch {
+        setJsonContext(null);
       }
     }
 
@@ -262,6 +315,7 @@ export default function Chat({ username, userFirstName, onLogout }) {
     e.target.value = '';
 
     const csvFiles = files.filter((f) => f.name.endsWith('.csv') || f.type === 'text/csv');
+    const jsonFiles = files.filter((f) => f.name.toLowerCase().endsWith('.json') || f.type === 'application/json');
     const imageFiles = files.filter((f) => f.type.startsWith('image/'));
 
     if (csvFiles.length > 0) {
@@ -275,6 +329,17 @@ export default function Chat({ username, userFirstName, onLogout }) {
         setSessionCsvRows(rows);
         setCsvDataSummary(computeDatasetSummary(rows, headers));
         setSessionSlimCsv(buildSlimCsv(rows, headers));
+      }
+    }
+    if (jsonFiles.length > 0) {
+      try {
+        const text = await fileToText(jsonFiles[0]);
+        const parsed = parseJsonAttachment(jsonFiles[0].name, text);
+        setJsonContext(parsed);
+        setSessionJsonSummary(parsed.summary);
+        setSessionJsonText(parsed.jsonText);
+      } catch {
+        setJsonContext(null);
       }
     }
     if (imageFiles.length > 0) {
@@ -320,7 +385,7 @@ export default function Chat({ username, userFirstName, onLogout }) {
 
   const handleSend = async () => {
     const text = input.trim();
-    if ((!text && !images.length && !csvContext) || streaming || !activeSessionId) return;
+    if ((!text && !images.length && !csvContext && !jsonContext) || streaming || !activeSessionId) return;
 
     // Lazily create the session in DB on the very first message
     let sessionId = activeSessionId;
@@ -339,7 +404,7 @@ export default function Chat({ username, userFirstName, onLogout }) {
     const wantPythonOnly = PYTHON_ONLY_KEYWORDS.test(text);
     const wantCode = CODE_KEYWORDS.test(text) && !sessionCsvRows;
     const capturedCsv = csvContext;
-    const hasCsvInSession = !!sessionCsvRows || !!capturedCsv;
+    const capturedJson = jsonContext;
     // Base64 is only worth sending when Gemini will actually run Python
     const needsBase64 = !!capturedCsv && wantPythonOnly;
     // Mode selection:
@@ -386,10 +451,28 @@ ${sessionSummary}${slimCsvBlock}
       ? `[CSV columns: ${sessionCsvHeaders?.join(', ')}]\n\n${sessionSummary}\n\n---\n\n`
       : '';
 
+    const currentJsonSummary = capturedJson?.summary || sessionJsonSummary || '';
+    const currentJsonText = capturedJson?.jsonText || sessionJsonText || '';
+    const jsonPrefix = currentJsonSummary
+      ? `[YouTube/JSON context]\n${currentJsonSummary}\n\n${
+          currentJsonText
+            ? `Full JSON content:\n\`\`\`json\n${currentJsonText.slice(0, 35000)}\n\`\`\`\n\n`
+            : ''
+        }---\n\n`
+      : '';
+
     // userContent  — displayed in bubble and stored in MongoDB (never contains base64)
     // promptForGemini — sent to the Gemini API (may contain the full prefix)
-    const userContent = text || (images.length ? '(Image)' : '(CSV attached)');
-    const promptForGemini = csvPrefix + (text || (images.length ? 'What do you see in this image?' : 'Please analyze this CSV data.'));
+    const userContent = text || (images.length ? '(Image)' : capturedJson ? '(JSON attached)' : '(CSV attached)');
+    const promptForGemini =
+      csvPrefix +
+      jsonPrefix +
+      (text ||
+        (images.length
+          ? 'What do you see in this image?'
+          : capturedJson
+          ? 'Please analyze this YouTube channel JSON data.'
+          : 'Please analyze this CSV data.'));
 
     const userMsg = {
       id: `u-${Date.now()}`,
@@ -398,6 +481,7 @@ ${sessionSummary}${slimCsvBlock}
       timestamp: new Date().toISOString(),
       images: [...images],
       csvName: capturedCsv?.name || null,
+      jsonName: capturedJson?.name || null,
     };
 
     setMessages((m) => [...m, userMsg]);
@@ -405,6 +489,7 @@ ${sessionSummary}${slimCsvBlock}
     const capturedImages = [...images];
     setImages([]);
     setCsvContext(null);
+    setJsonContext(null);
     setStreaming(true);
 
     // Store display text only — base64 is never persisted
@@ -465,14 +550,16 @@ ${sessionSummary}${slimCsvBlock}
           if (abortRef.current) break;
           if (chunk.type === 'text') {
             fullContent += chunk.text;
+            const nextContent = fullContent;
             setMessages((m) =>
-              m.map((msg) => (msg.id === assistantId ? { ...msg, content: fullContent } : msg))
+              m.map((msg) => (msg.id === assistantId ? { ...msg, content: nextContent } : msg))
             );
           } else if (chunk.type === 'fullResponse') {
             structuredParts = chunk.parts;
+            const nextParts = structuredParts;
             setMessages((m) =>
               m.map((msg) =>
-                msg.id === assistantId ? { ...msg, content: '', parts: structuredParts } : msg
+                msg.id === assistantId ? { ...msg, content: '', parts: nextParts } : msg
               )
             );
           } else if (chunk.type === 'grounding') {
@@ -587,191 +674,222 @@ ${sessionSummary}${slimCsvBlock}
       <div className="chat-main">
         <>
         <header className="chat-header">
-          <h2 className="chat-header-title">{activeSession?.title ?? 'New Chat'}</h2>
+          <div className="chat-header-tabs">
+            <button
+              type="button"
+              className={`chat-header-tab ${activePage === 'chat' ? 'active' : ''}`}
+              onClick={() => setActivePage('chat')}
+            >
+              Chat
+            </button>
+            <button
+              type="button"
+              className={`chat-header-tab ${activePage === 'youtube' ? 'active' : ''}`}
+              onClick={() => setActivePage('youtube')}
+            >
+              YouTube Channel Download
+            </button>
+          </div>
+          <h2 className="chat-header-title">
+            {activePage === 'chat' ? activeSession?.title ?? 'New Chat' : 'YouTube Data Fetcher'}
+          </h2>
         </header>
+        {activePage === 'chat' ? (
+          <>
+            <div
+              className={`chat-messages${dragOver ? ' drag-over' : ''}`}
+              onDragOver={(e) => {
+                e.preventDefault();
+                setDragOver(true);
+              }}
+              onDragLeave={() => setDragOver(false)}
+              onDrop={handleDrop}
+            >
+              {messages.map((m) => (
+                <div key={m.id} className={`chat-msg ${m.role}`}>
+                  <div className="chat-msg-meta">
+                    <span className="chat-msg-role">{m.role === 'user' ? username : 'Assistant'}</span>
+                    <span className="chat-msg-time">
+                      {new Date(m.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                    </span>
+                  </div>
 
-        <div
-          className={`chat-messages${dragOver ? ' drag-over' : ''}`}
-          onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
-          onDragLeave={() => setDragOver(false)}
-          onDrop={handleDrop}
-        >
-          {messages.map((m) => (
-            <div key={m.id} className={`chat-msg ${m.role}`}>
-              <div className="chat-msg-meta">
-                <span className="chat-msg-role">{m.role === 'user' ? username : 'Assistant'}</span>
-                <span className="chat-msg-time">
-                  {new Date(m.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                </span>
-              </div>
+                  {/* CSV/JSON badges on user messages */}
+                  {m.csvName && <div className="msg-csv-badge">📄 {m.csvName}</div>}
+                  {m.jsonName && <div className="msg-json-badge">🧾 {m.jsonName}</div>}
 
-              {/* CSV badge on user messages */}
-              {m.csvName && (
-                <div className="msg-csv-badge">
-                  📄 {m.csvName}
+                  {/* Image attachments */}
+                  {m.images?.length > 0 && (
+                    <div className="chat-msg-images">
+                      {m.images.map((img, i) => (
+                        <img key={i} src={`data:${img.mimeType};base64,${img.data}`} alt="" className="chat-msg-thumb" />
+                      ))}
+                    </div>
+                  )}
+
+                  {/* Message body */}
+                  <div className="chat-msg-content">
+                    {m.role === 'model' ? (
+                      m.parts ? (
+                        <StructuredParts parts={m.parts} />
+                      ) : m.content ? (
+                        <ReactMarkdown remarkPlugins={[remarkGfm]}>{m.content}</ReactMarkdown>
+                      ) : (
+                        <span className="thinking-dots">
+                          <span /><span /><span />
+                        </span>
+                      )
+                    ) : (
+                      m.content
+                    )}
+                  </div>
+
+                  {/* Tool calls log */}
+                  {m.toolCalls?.length > 0 && (
+                    <details className="tool-calls-details">
+                      <summary className="tool-calls-summary">
+                        🔧 {m.toolCalls.length} tool{m.toolCalls.length > 1 ? 's' : ''} used
+                      </summary>
+                      <div className="tool-calls-list">
+                        {m.toolCalls.map((tc, i) => (
+                          <div key={i} className="tool-call-item">
+                            <span className="tool-call-name">{tc.name}</span>
+                            <span className="tool-call-args">{JSON.stringify(tc.args)}</span>
+                            {tc.result && !tc.result._chartType && (
+                              <span className="tool-call-result">
+                                → {JSON.stringify(tc.result).slice(0, 200)}
+                                {JSON.stringify(tc.result).length > 200 ? '…' : ''}
+                              </span>
+                            )}
+                            {tc.result?._chartType && (
+                              <span className="tool-call-result">→ rendered chart</span>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    </details>
+                  )}
+
+                  {/* Engagement charts from tool calls */}
+                  {m.charts?.map((chart, ci) =>
+                    chart._chartType === 'engagement' ? (
+                      <EngagementChart
+                        key={ci}
+                        data={chart.data}
+                        metricColumn={chart.metricColumn}
+                      />
+                    ) : null
+                  )}
+
+                  {/* Search sources */}
+                  {m.grounding?.groundingChunks?.length > 0 && (
+                    <div className="chat-msg-sources">
+                      <span className="sources-label">Sources</span>
+                      <div className="sources-list">
+                        {m.grounding.groundingChunks.map((chunk, i) =>
+                          chunk.web ? (
+                            <a key={i} href={chunk.web.uri} target="_blank" rel="noreferrer" className="source-link">
+                              {chunk.web.title || chunk.web.uri}
+                            </a>
+                          ) : null
+                        )}
+                      </div>
+                      {m.grounding.webSearchQueries?.length > 0 && (
+                        <div className="sources-queries">
+                          Searched: {m.grounding.webSearchQueries.join(' · ')}
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              ))}
+              <div ref={bottomRef} />
+            </div>
+
+            {dragOver && <div className="chat-drop-overlay">Drop CSV, JSON, or images here</div>}
+
+            {/* ── Input area ── */}
+            <div className="chat-input-area">
+              {/* CSV chip */}
+              {csvContext && (
+                <div className="csv-chip">
+                  <span className="csv-chip-icon">📄</span>
+                  <span className="csv-chip-name">{csvContext.name}</span>
+                  <span className="csv-chip-meta">
+                    {csvContext.rowCount} rows · {csvContext.headers.length} cols
+                  </span>
+                  <button className="csv-chip-remove" onClick={() => setCsvContext(null)} aria-label="Remove CSV">×</button>
+                </div>
+              )}
+              {jsonContext && (
+                <div className="json-chip">
+                  <span className="csv-chip-icon">🧾</span>
+                  <span className="csv-chip-name">{jsonContext.name}</span>
+                  <span className="csv-chip-meta">{jsonContext.totalVideos} videos</span>
+                  <button className="csv-chip-remove" onClick={() => setJsonContext(null)} aria-label="Remove JSON">×</button>
                 </div>
               )}
 
-              {/* Image attachments */}
-              {m.images?.length > 0 && (
-                <div className="chat-msg-images">
-                  {m.images.map((img, i) => (
-                    <img key={i} src={`data:${img.mimeType};base64,${img.data}`} alt="" className="chat-msg-thumb" />
+              {/* Image previews */}
+              {images.length > 0 && (
+                <div className="chat-image-previews">
+                  {images.map((img, i) => (
+                    <div key={i} className="chat-img-preview">
+                      <img src={`data:${img.mimeType};base64,${img.data}`} alt="" />
+                      <button type="button" onClick={() => removeImage(i)} aria-label="Remove">×</button>
+                    </div>
                   ))}
                 </div>
               )}
 
-              {/* Message body */}
-              <div className="chat-msg-content">
-                {m.role === 'model' ? (
-                  m.parts ? (
-                    <StructuredParts parts={m.parts} />
-                  ) : m.content ? (
-                    <ReactMarkdown remarkPlugins={[remarkGfm]}>{m.content}</ReactMarkdown>
-                  ) : (
-                    <span className="thinking-dots">
-                      <span /><span /><span />
-                    </span>
-                  )
+              {/* Hidden file picker */}
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept="image/*,.csv,text/csv,.json,application/json"
+                multiple
+                style={{ display: 'none' }}
+                onChange={handleFileSelect}
+              />
+
+              <div className="chat-input-row">
+                <button
+                  type="button"
+                  className="attach-btn"
+                  onClick={() => fileInputRef.current?.click()}
+                  disabled={streaming}
+                  title="Attach image, CSV, or JSON"
+                >
+                  📎
+                </button>
+                <input
+                  ref={inputRef}
+                  type="text"
+                  placeholder="Ask a question, request analysis, or write & run code…"
+                  value={input}
+                  onChange={(e) => setInput(e.target.value)}
+                  onKeyDown={(e) => e.key === 'Enter' && !e.shiftKey && handleSend()}
+                  onPaste={handlePaste}
+                  disabled={streaming}
+                />
+                {streaming ? (
+                  <button onClick={handleStop} className="stop-btn">
+                    ■ Stop
+                  </button>
                 ) : (
-                  m.content
+                  <button
+                    onClick={handleSend}
+                    disabled={!input.trim() && !images.length && !csvContext && !jsonContext}
+                  >
+                    Send
+                  </button>
                 )}
               </div>
-
-              {/* Tool calls log */}
-              {m.toolCalls?.length > 0 && (
-                <details className="tool-calls-details">
-                  <summary className="tool-calls-summary">
-                    🔧 {m.toolCalls.length} tool{m.toolCalls.length > 1 ? 's' : ''} used
-                  </summary>
-                  <div className="tool-calls-list">
-                    {m.toolCalls.map((tc, i) => (
-                      <div key={i} className="tool-call-item">
-                        <span className="tool-call-name">{tc.name}</span>
-                        <span className="tool-call-args">{JSON.stringify(tc.args)}</span>
-                        {tc.result && !tc.result._chartType && (
-                          <span className="tool-call-result">
-                            → {JSON.stringify(tc.result).slice(0, 200)}
-                            {JSON.stringify(tc.result).length > 200 ? '…' : ''}
-                          </span>
-                        )}
-                        {tc.result?._chartType && (
-                          <span className="tool-call-result">→ rendered chart</span>
-                        )}
-                      </div>
-                    ))}
-                  </div>
-                </details>
-              )}
-
-              {/* Engagement charts from tool calls */}
-              {m.charts?.map((chart, ci) =>
-                chart._chartType === 'engagement' ? (
-                  <EngagementChart
-                    key={ci}
-                    data={chart.data}
-                    metricColumn={chart.metricColumn}
-                  />
-                ) : null
-              )}
-
-              {/* Search sources */}
-              {m.grounding?.groundingChunks?.length > 0 && (
-                <div className="chat-msg-sources">
-                  <span className="sources-label">Sources</span>
-                  <div className="sources-list">
-                    {m.grounding.groundingChunks.map((chunk, i) =>
-                      chunk.web ? (
-                        <a key={i} href={chunk.web.uri} target="_blank" rel="noreferrer" className="source-link">
-                          {chunk.web.title || chunk.web.uri}
-                        </a>
-                      ) : null
-                    )}
-                  </div>
-                  {m.grounding.webSearchQueries?.length > 0 && (
-                    <div className="sources-queries">
-                      Searched: {m.grounding.webSearchQueries.join(' · ')}
-                    </div>
-                  )}
-                </div>
-              )}
             </div>
-          ))}
-          <div ref={bottomRef} />
-        </div>
-
-        {dragOver && <div className="chat-drop-overlay">Drop CSV or images here</div>}
-
-        {/* ── Input area ── */}
-        <div className="chat-input-area">
-          {/* CSV chip */}
-          {csvContext && (
-            <div className="csv-chip">
-              <span className="csv-chip-icon">📄</span>
-              <span className="csv-chip-name">{csvContext.name}</span>
-              <span className="csv-chip-meta">
-                {csvContext.rowCount} rows · {csvContext.headers.length} cols
-              </span>
-              <button className="csv-chip-remove" onClick={() => setCsvContext(null)} aria-label="Remove CSV">×</button>
-            </div>
-          )}
-
-          {/* Image previews */}
-          {images.length > 0 && (
-            <div className="chat-image-previews">
-              {images.map((img, i) => (
-                <div key={i} className="chat-img-preview">
-                  <img src={`data:${img.mimeType};base64,${img.data}`} alt="" />
-                  <button type="button" onClick={() => removeImage(i)} aria-label="Remove">×</button>
-                </div>
-              ))}
-            </div>
-          )}
-
-          {/* Hidden file picker */}
-          <input
-            ref={fileInputRef}
-            type="file"
-            accept="image/*,.csv,text/csv"
-            multiple
-            style={{ display: 'none' }}
-            onChange={handleFileSelect}
-          />
-
-          <div className="chat-input-row">
-            <button
-              type="button"
-              className="attach-btn"
-              onClick={() => fileInputRef.current?.click()}
-              disabled={streaming}
-              title="Attach image or CSV"
-            >
-              📎
-            </button>
-            <input
-              ref={inputRef}
-              type="text"
-              placeholder="Ask a question, request analysis, or write & run code…"
-              value={input}
-              onChange={(e) => setInput(e.target.value)}
-              onKeyDown={(e) => e.key === 'Enter' && !e.shiftKey && handleSend()}
-              onPaste={handlePaste}
-              disabled={streaming}
-            />
-            {streaming ? (
-              <button onClick={handleStop} className="stop-btn">
-                ■ Stop
-              </button>
-            ) : (
-              <button
-                onClick={handleSend}
-                disabled={!input.trim() && !images.length && !csvContext}
-              >
-                Send
-              </button>
-            )}
-          </div>
-        </div>
+          </>
+        ) : (
+          <YouTubeDownloader />
+        )}
         </>
       </div>
     </div>
