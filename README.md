@@ -48,6 +48,8 @@ One document per registered user.
 | `_id` | ObjectId | Auto-generated |
 | `username` | string | Lowercase username |
 | `password` | string | bcrypt hash |
+| `firstName` | string | User first name |
+| `lastName` | string | User last name |
 | `email` | string | Email address (optional) |
 | `createdAt` | string | ISO timestamp |
 
@@ -212,7 +214,7 @@ All packages are installed via `npm install`. Key dependencies:
 
 ## Features
 
-- **Create account / Login** – Username + password, hashed with bcrypt
+- **Create account / Login** – Username, first name, last name, and password (hashed with bcrypt)
 - **Session-based chat history** – Each conversation is a separate session; sidebar lists all chats with delete option
 - **Streaming Gemini responses** – Text streams in real time with animated "..." while thinking; Stop button to cancel
 - **Google Search grounding** – Answers include cited web sources for factual queries
@@ -226,6 +228,15 @@ All packages are installed via `npm install`. Key dependencies:
 - **Tool routing logic** – The app automatically routes requests: client-side JS tools for simple stats, Python code execution for plots and complex models, Google Search for factual queries
 - **Markdown rendering** – AI responses render headers, lists, code blocks, tables, and links
 - **Image support** – Attach images via drag-and-drop, the 📎 button, or paste from clipboard (Ctrl+V)
+
+## Features Added
+
+### User Personalization
+
+- **Richer registration profile** – Create Account now collects `firstName` and `lastName` in addition to username, email, and password.
+- **Backend persistence** – User records in MongoDB now save `firstName` and `lastName` on registration.
+- **Personalized session context** – After login, user profile data is preserved in frontend state so `firstName` is available for personalization.
+- **Assistant greeting behavior** – The system prompt now defines the persona as **YouTube Research & Analysis Assistant** and instructs the assistant to greet the user by first name in the first message of a new conversation.
 
 ## Chat System Prompt
 

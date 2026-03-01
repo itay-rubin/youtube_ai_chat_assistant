@@ -45,26 +45,35 @@ app.get('/api/status', async (req, res) => {
 
 // ── Users ────────────────────────────────────────────────────────────────────
 
-app.post('/api/users', async (req, res) => {
+const registerHandler = async (req, res) => {
   try {
-    const { username, password, email } = req.body;
+    const { username, password, email, firstName, lastName } = req.body;
     if (!username || !password)
       return res.status(400).json({ error: 'Username and password required' });
+    if (!firstName || !lastName)
+      return res.status(400).json({ error: 'First name and last name required' });
     const name = String(username).trim().toLowerCase();
     const existing = await db.collection('users').findOne({ username: name });
     if (existing) return res.status(400).json({ error: 'Username already exists' });
     const hashed = await bcrypt.hash(password, 10);
+    const safeFirstName = String(firstName).trim();
+    const safeLastName = String(lastName).trim();
     await db.collection('users').insertOne({
       username: name,
       password: hashed,
       email: email ? String(email).trim().toLowerCase() : null,
+      firstName: safeFirstName,
+      lastName: safeLastName,
       createdAt: new Date().toISOString(),
     });
     res.json({ ok: true });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
-});
+};
+
+app.post('/api/register', registerHandler);
+app.post('/api/users', registerHandler);
 
 app.post('/api/users/login', async (req, res) => {
   try {
@@ -76,7 +85,13 @@ app.post('/api/users/login', async (req, res) => {
     if (!user) return res.status(401).json({ error: 'User not found' });
     const ok = await bcrypt.compare(password, user.password);
     if (!ok) return res.status(401).json({ error: 'Invalid password' });
-    res.json({ ok: true, username: name });
+    res.json({
+      ok: true,
+      username: name,
+      firstName: user.firstName || '',
+      lastName: user.lastName || '',
+      email: user.email || '',
+    });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
