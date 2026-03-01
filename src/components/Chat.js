@@ -1,8 +1,20 @@
 import { useState, useEffect, useRef } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import { streamChat, chatWithCsvTools, CODE_KEYWORDS } from '../services/gemini';
+import {
+  ResponsiveContainer,
+  LineChart,
+  Line,
+  BarChart,
+  Bar,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  Tooltip,
+} from 'recharts';
+import { streamChat, chatWithDataTools, CODE_KEYWORDS } from '../services/gemini';
 import { parseCsvToRows, executeTool, computeDatasetSummary, enrichWithEngagement, buildSlimCsv } from '../services/csvTools';
+import { executeJsonTool } from '../services/jsonTools';
 import {
   getSessions,
   createSession,
@@ -71,6 +83,7 @@ const parseJsonAttachment = (fileName, text) => {
     summary,
     totalVideos: videos.length,
     jsonText: JSON.stringify(parsed, null, 2),
+    parsed,
   };
 };
 
@@ -136,6 +149,92 @@ function StructuredParts({ parts }) {
   );
 }
 
+const downloadChartCsv = (chart) => {
+  const metric = chart.metric;
+  const rows = chart.data || [];
+  const header = ['date', metric, 'title', 'url'];
+  const escape = (value) => {
+    const s = String(value ?? '');
+    return s.includes(',') || s.includes('"') || s.includes('\n')
+      ? `"${s.replace(/"/g, '""')}"`
+      : s;
+  };
+  const lines = [
+    header.join(','),
+    ...rows.map((r) => [r.date, r[metric], r.title, r.url].map(escape).join(',')),
+  ];
+  const blob = new Blob([lines.join('\n')], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `${metric}_vs_time.csv`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+};
+
+function MetricTimeChart({ chart, expanded = false, onExpand }) {
+  const metric = chart.metric;
+  const lineColor = '#818cf8';
+
+  return (
+    <div className={`metric-time-wrap ${expanded ? 'expanded' : ''}`}>
+      <div className="metric-time-header">
+        <span>{metric} vs time ({chart.chartType})</span>
+        <div className="metric-time-actions">
+          {!expanded && (
+            <button type="button" onClick={onExpand}>
+              Enlarge
+            </button>
+          )}
+          <button type="button" onClick={() => downloadChartCsv(chart)}>
+            Download CSV
+          </button>
+        </div>
+      </div>
+      <div className="metric-time-chart">
+        <ResponsiveContainer width="100%" height="100%">
+          {chart.chartType === 'bar' ? (
+            <BarChart data={chart.data}>
+              <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.12)" />
+              <XAxis dataKey="date" tick={{ fill: 'rgba(255,255,255,0.65)', fontSize: 11 }} />
+              <YAxis tick={{ fill: 'rgba(255,255,255,0.65)', fontSize: 11 }} />
+              <Tooltip />
+              <Bar dataKey={metric} fill={lineColor} />
+            </BarChart>
+          ) : (
+            <LineChart data={chart.data}>
+              <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.12)" />
+              <XAxis dataKey="date" tick={{ fill: 'rgba(255,255,255,0.65)', fontSize: 11 }} />
+              <YAxis tick={{ fill: 'rgba(255,255,255,0.65)', fontSize: 11 }} />
+              <Tooltip />
+              <Line type="monotone" dataKey={metric} stroke={lineColor} strokeWidth={2.5} dot={false} />
+            </LineChart>
+          )}
+        </ResponsiveContainer>
+      </div>
+    </div>
+  );
+}
+
+function VideoCard({ card }) {
+  return (
+    <a href={card.url} target="_blank" rel="noreferrer" className="video-card-link">
+      <div className="video-card">
+        {card.thumbnailUrl ? <img src={card.thumbnailUrl} alt={card.title} className="video-card-thumb" /> : null}
+        <div className="video-card-body">
+          <div className="video-card-title">{card.title}</div>
+          <div className="video-card-meta">
+            {card.publishedAt ? new Date(card.publishedAt).toLocaleDateString() : 'Unknown date'} ·{' '}
+            {Number(card.viewCount || 0).toLocaleString()} views
+          </div>
+        </div>
+      </div>
+    </a>
+  );
+}
+
 // ── Main component ────────────────────────────────────────────────────────────
 
 export default function Chat({ username, userFirstName, onLogout }) {
@@ -153,9 +252,11 @@ export default function Chat({ username, userFirstName, onLogout }) {
   const [sessionSlimCsv, setSessionSlimCsv] = useState(null);   // key-columns CSV string sent directly to Gemini
   const [sessionJsonSummary, setSessionJsonSummary] = useState(null);
   const [sessionJsonText, setSessionJsonText] = useState(null);
+  const [sessionJsonData, setSessionJsonData] = useState(null);
   const [streaming, setStreaming] = useState(false);
   const [dragOver, setDragOver] = useState(false);
   const [openMenuId, setOpenMenuId] = useState(null);
+  const [expandedChart, setExpandedChart] = useState(null);
 
   const bottomRef = useRef(null);
   const inputRef = useRef(null);
@@ -214,6 +315,7 @@ export default function Chat({ username, userFirstName, onLogout }) {
     setSessionCsvHeaders(null);
     setSessionJsonSummary(null);
     setSessionJsonText(null);
+    setSessionJsonData(null);
   };
 
   const handleSelectSession = (sessionId) => {
@@ -227,6 +329,7 @@ export default function Chat({ username, userFirstName, onLogout }) {
     setSessionCsvHeaders(null);
     setSessionJsonSummary(null);
     setSessionJsonText(null);
+    setSessionJsonData(null);
   };
 
   const handleDeleteSession = async (sessionId, e) => {
@@ -293,8 +396,10 @@ export default function Chat({ username, userFirstName, onLogout }) {
         setJsonContext(parsed);
         setSessionJsonSummary(parsed.summary);
         setSessionJsonText(parsed.jsonText);
+        setSessionJsonData(parsed.parsed);
       } catch {
         setJsonContext(null);
+        setSessionJsonData(null);
       }
     }
 
@@ -338,8 +443,10 @@ export default function Chat({ username, userFirstName, onLogout }) {
         setJsonContext(parsed);
         setSessionJsonSummary(parsed.summary);
         setSessionJsonText(parsed.jsonText);
+        setSessionJsonData(parsed.parsed);
       } catch {
         setJsonContext(null);
+        setSessionJsonData(null);
       }
     }
     if (imageFiles.length > 0) {
@@ -402,16 +509,17 @@ export default function Chat({ username, userFirstName, onLogout }) {
     // PYTHON_ONLY = things the client tools genuinely cannot produce
     const PYTHON_ONLY_KEYWORDS = /\b(regression|scatter|histogram|seaborn|matplotlib|numpy|time.?series|heatmap|box.?plot|violin|distribut|linear.?model|logistic|forecast|trend.?line)\b/i;
     const wantPythonOnly = PYTHON_ONLY_KEYWORDS.test(text);
-    const wantCode = CODE_KEYWORDS.test(text) && !sessionCsvRows;
+    const wantCode = CODE_KEYWORDS.test(text) && !sessionCsvRows && !sessionJsonData;
     const capturedCsv = csvContext;
     const capturedJson = jsonContext;
+    const capturedJsonData = capturedJson?.parsed || sessionJsonData;
     // Base64 is only worth sending when Gemini will actually run Python
     const needsBase64 = !!capturedCsv && wantPythonOnly;
     // Mode selection:
     //   useTools        — CSV loaded + no Python needed → client-side JS tools (free, fast)
     //   useCodeExecution — Python explicitly needed (regression, histogram, etc.)
     //   else            — Google Search streaming (also used for "tell me about this file")
-    const useTools = !!sessionCsvRows && !wantPythonOnly && !wantCode && !capturedCsv;
+    const useTools = (!!sessionCsvRows || !!capturedJsonData) && !wantPythonOnly && !wantCode && !capturedCsv;
     const useCodeExecution = wantPythonOnly || wantCode;
 
     // ── Build prompt ─────────────────────────────────────────────────────────
@@ -490,6 +598,7 @@ ${sessionSummary}${slimCsvBlock}
     setImages([]);
     setCsvContext(null);
     setJsonContext(null);
+    if (capturedJsonData) setSessionJsonData(capturedJsonData);
     setStreaming(true);
 
     // Store display text only — base64 is never persisted
@@ -519,12 +628,43 @@ ${sessionSummary}${slimCsvBlock}
     try {
       if (useTools) {
         // ── Function-calling path: Gemini picks tool + args, JS executes ──────
-        console.log('[Chat] useTools=true | rows:', sessionCsvRows.length, '| headers:', sessionCsvHeaders);
-        const { text: answer, charts: returnedCharts, toolCalls: returnedCalls } = await chatWithCsvTools(
+        console.log(
+          '[Chat] useTools=true | rows:',
+          sessionCsvRows?.length || 0,
+          '| headers:',
+          sessionCsvHeaders || []
+        );
+        const jsonFieldNames = capturedJsonData?.videos?.[0]
+          ? Object.keys(capturedJsonData.videos[0])
+          : [];
+        const { text: answer, charts: returnedCharts, toolCalls: returnedCalls } = await chatWithDataTools(
           history,
           promptForGemini,
           sessionCsvHeaders,
-          (toolName, args) => executeTool(toolName, args, sessionCsvRows),
+          jsonFieldNames,
+          (toolName, args) => {
+            if (['compute_stats_json', 'plot_metric_vs_time', 'play_video'].includes(toolName)) {
+              return executeJsonTool(toolName, args, capturedJsonData);
+            }
+            // Defensive fallback: if Gemini picks CSV ranking while only JSON is loaded,
+            // map view-based ranking requests to the JSON play_video tool.
+            if (
+              toolName === 'get_top_tweets' &&
+              !sessionCsvRows &&
+              capturedJsonData &&
+              /view/i.test(String(args?.sort_column || ''))
+            ) {
+              return executeJsonTool(
+                'play_video',
+                {
+                  rank: 1,
+                  order: args?.ascending ? 'least_viewed' : 'most_viewed',
+                },
+                capturedJsonData
+              );
+            }
+            return executeTool(toolName, args, sessionCsvRows || []);
+          },
           userFirstName
         );
         fullContent = answer;
@@ -770,14 +910,18 @@ ${sessionSummary}${slimCsvBlock}
                     </details>
                   )}
 
-                  {/* Engagement charts from tool calls */}
+                  {/* Visual outputs from tool calls */}
                   {m.charts?.map((chart, ci) =>
                     chart._chartType === 'engagement' ? (
-                      <EngagementChart
+                      <EngagementChart key={ci} data={chart.data} metricColumn={chart.metricColumn} />
+                    ) : chart._chartType === 'metric_time' ? (
+                      <MetricTimeChart
                         key={ci}
-                        data={chart.data}
-                        metricColumn={chart.metricColumn}
+                        chart={chart}
+                        onExpand={() => setExpandedChart(chart)}
                       />
+                    ) : chart._chartType === 'video_card' ? (
+                      <VideoCard key={ci} card={chart} />
                     ) : null
                   )}
 
@@ -886,6 +1030,20 @@ ${sessionSummary}${slimCsvBlock}
                 )}
               </div>
             </div>
+
+            {expandedChart && (
+              <div className="chart-modal-backdrop" onClick={() => setExpandedChart(null)}>
+                <div className="chart-modal" onClick={(e) => e.stopPropagation()}>
+                  <div className="chart-modal-top">
+                    <h4>{expandedChart.metric} vs time</h4>
+                    <button type="button" onClick={() => setExpandedChart(null)}>
+                      Close
+                    </button>
+                  </div>
+                  <MetricTimeChart chart={expandedChart} expanded />
+                </div>
+              </div>
+            )}
           </>
         ) : (
           <YouTubeDownloader />
