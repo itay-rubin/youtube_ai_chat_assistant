@@ -4,8 +4,8 @@ A React chatbot with Gemini AI, web search, user auth, MongoDB persistence, and 
 
 ## How It Works
 
-- **Frontend (React)** – Login/create account, chat UI with streaming, drag-and-drop CSV/images, Recharts bar charts
-- **Backend (Express)** – REST API for users and sessions, connects to MongoDB
+- **Frontend (React)** – Login/create account, chat UI with streaming, drag-and-drop CSV/JSON/images, Recharts bar charts, YouTube downloader tab
+- **Backend (Express)** – REST API for users, sessions, and YouTube channel data download jobs
 - **AI (Gemini)** – Streaming chat, Google Search grounding, Python code execution, and function calling for client-side tools
 - **Storage (MongoDB)** – Users and chat sessions stored in `chatapp` database
 
@@ -220,6 +220,7 @@ All packages are installed via `npm install`. Key dependencies:
 - **Google Search grounding** – Answers include cited web sources for factual queries
 - **Python code execution** – Gemini writes and runs Python for plots, regression, histogram, scatter, and any analysis the JS tools can't handle
 - **CSV upload** – Drag-and-drop or click to attach a CSV; a slim version of the data (key columns as plain text) plus a full statistical summary are sent to Gemini automatically
+- **JSON upload in chat** – Drag-and-drop or attach YouTube channel JSON files; the assistant reads channel/video metadata context directly from the JSON
 - **Auto-computed engagement column** – When a CSV has `Favorite Count` and `View Count` columns, an `engagement` ratio (Favorite Count / View Count) is added automatically to every row
 - **Client-side data analysis tools** – Fast, zero-cost function-calling tools that run in the browser. Gemini calls these automatically for data questions; results are saved to MongoDB alongside the message:
   - `compute_column_stats(column)` – mean, median, std, min, max, count for any numeric column
@@ -237,6 +238,24 @@ All packages are installed via `npm install`. Key dependencies:
 - **Backend persistence** – User records in MongoDB now save `firstName` and `lastName` on registration.
 - **Personalized session context** – After login, user profile data is preserved in frontend state so `firstName` is available for personalization.
 - **Assistant greeting behavior** – The system prompt now defines the persona as **YouTube Research & Analysis Assistant** and instructs the assistant to greet the user by first name in the first message of a new conversation.
+
+### YouTube Data Fetcher
+
+- **New tab/page** – Added a **YouTube Channel Download** page in the app header.
+- **Downloader inputs** – Enter a channel URL/handle and choose `maxVideos` from 1 to 100.
+- **Progress tracking** – Download runs as a backend job with live progress updates in the UI.
+- **Downloadable JSON** – When complete, the job provides a generated JSON file containing channel metadata, per-video stats, and transcripts.
+- **Sample data included** – `public/veritasium_sample.json` contains 10 downloaded videos from `@veritasium`.
+- **Chat integration** – You can drag a JSON file into chat and the assistant will use it as analysis context.
+
+## YouTube Data Fetcher Usage
+
+1. Log in and open the **YouTube Channel Download** tab.
+2. Enter a channel URL or handle (for example, `https://www.youtube.com/@veritasium` or `@veritasium`).
+3. Set **Max Videos** (1-100), then click **Fetch Channel Data**.
+4. Watch the progress bar while the backend collects videos, transcript text, and stats.
+5. Click **Download JSON** when the job finishes.
+6. Drag the downloaded `.json` file into chat (or attach it via 📎) and ask analysis questions.
 
 ## Chat System Prompt
 

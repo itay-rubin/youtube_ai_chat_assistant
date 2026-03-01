@@ -70,3 +70,20 @@ export const saveMessage = async (sessionId, role, content, imageData = null, ch
 export const loadMessages = async (sessionId) => {
   return api(`/api/messages?session_id=${encodeURIComponent(sessionId)}`);
 };
+
+// ── YouTube downloader ────────────────────────────────────────────────────────
+
+export const startYouTubeDownloadJob = async (url, maxVideos) => {
+  return api('/api/youtube/jobs', {
+    method: 'POST',
+    body: JSON.stringify({ url, maxVideos }),
+  });
+};
+
+export const getYouTubeDownloadJob = async (jobId) => {
+  return api(`/api/youtube/jobs/${encodeURIComponent(jobId)}`);
+};
+
+export const getYouTubeDownloadUrl = (jobId) => {
+  return `${API}/api/youtube/jobs/${encodeURIComponent(jobId)}/download`;
+};

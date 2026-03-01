@@ -237,6 +237,30 @@
   flex-shrink: 0;
 }
 
+.chat-header-tabs {
+  display: flex;
+  gap: 0.45rem;
+  margin-bottom: 0.6rem;
+}
+
+.chat-header-tab {
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.06);
+  color: rgba(255, 255, 255, 0.75);
+  font-size: 0.75rem;
+  font-weight: 600;
+  padding: 0.32rem 0.8rem;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.chat-header-tab.active {
+  background: rgba(99, 102, 241, 0.75);
+  border-color: rgba(129, 140, 248, 0.55);
+  color: #fff;
+}
+
 .chat-header-title {
   font-family: 'Inter', sans-serif;
   font-size: 1rem;
@@ -736,6 +760,18 @@
   max-width: 100%;
 }
 
+.json-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  margin: 0 0 0.65rem 0.5rem;
+  padding: 0.4rem 0.75rem 0.4rem 0.6rem;
+  background: rgba(56, 189, 248, 0.12);
+  border: 1px solid rgba(56, 189, 248, 0.28);
+  border-radius: 20px;
+  max-width: 100%;
+}
+
 .csv-chip-icon {
   font-size: 0.95rem;
   flex-shrink: 0;
@@ -787,6 +823,18 @@
   font-family: 'Inter', sans-serif;
   font-size: 0.72rem;
   color: #6ee7b7;
+}
+
+.msg-json-badge {
+  display: inline-block;
+  margin: 0 0 0.4rem 0.4rem;
+  padding: 0.2rem 0.55rem;
+  background: rgba(56, 189, 248, 0.14);
+  border: 1px solid rgba(56, 189, 248, 0.25);
+  border-radius: 12px;
+  font-family: 'Inter', sans-serif;
+  font-size: 0.72rem;
+  color: #7dd3fc;
 }
 
 /* ── Structured message parts (code execution) ───────────────────────────── */
